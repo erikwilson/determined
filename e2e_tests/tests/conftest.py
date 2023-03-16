@@ -196,7 +196,7 @@ def using_k8s(request: SubRequest) -> bool:
         "config",
         "--json",
     ]
-
+    time.sleep(15)
     with logged_in_user(ADMIN_CREDENTIALS):
         output = subprocess.check_output(command, universal_newlines=True, stderr=subprocess.PIPE)
 
