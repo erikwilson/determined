@@ -1,9 +1,6 @@
 package actorrm
 
 import (
-	"fmt"
-	"reflect"
-
 	"github.com/pkg/errors"
 
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -263,57 +260,19 @@ func (r *ResourceManager) Tell(ctx actor.Messenger, req interface{}) {
 
 // Ask asks the underlying actor-based RM the req, setting the response into v.
 func (r *ResourceManager) Ask(ctx actor.Messenger, req interface{}, v interface{}) error {
-	if reflect.ValueOf(v).IsValid() && !reflect.ValueOf(v).Elem().CanSet() {
-		return fmt.Errorf("ask to %s has valid but unsettable resp %T", r.ref.Address(), v)
+	ask := func() actor.Response {
+		return ctx.Ask(r.ref, req)
 	}
-	expectingResponse := reflect.ValueOf(v).IsValid() && reflect.ValueOf(v).Elem().CanSet()
-	switch resp := ctx.Ask(r.ref, req); {
-	case resp.Source() == nil:
-		return fmt.Errorf("actor %s could not be found", r.ref.Address())
-	case expectingResponse && resp.Empty(), expectingResponse && resp.Get() == nil:
-		return fmt.Errorf("actor %s did not response", r.ref.Address())
-	case resp.Error() != nil:
-		return resp.Error()
-	default:
-		if expectingResponse {
-			if reflect.ValueOf(v).Elem().Type() != reflect.ValueOf(resp.Get()).Type() {
-				return fmt.Errorf(
-					"%s returned unexpected resp (%T): %v",
-					r.ref.Address(),
-					resp,
-					resp,
-				)
-			}
-			reflect.ValueOf(v).Elem().Set(reflect.ValueOf(resp.Get()))
-		}
-		return nil
-	}
+	return actor.AskFunc(ask, r.ref.Address().String(), req, v)
 }
 
 // AskAt asks an actor and sets the response in v. It returns an error if the actor doesn't
 // respond, respond with an error, or v isn't settable.
-// TODO(Brad): Consolidate occurrences of this code.
 func AskAt(sys *actor.System, addr actor.Address, req interface{}, v interface{}) error {
-	if reflect.ValueOf(v).IsValid() && !reflect.ValueOf(v).Elem().CanSet() {
-		return fmt.Errorf("ask at %s has valid but unsettable resp %T", addr, v)
+	ask := func() actor.Response {
+		return sys.AskAt(addr, req)
 	}
-	expectingResponse := reflect.ValueOf(v).IsValid() && reflect.ValueOf(v).Elem().CanSet()
-	switch resp := sys.AskAt(addr, req); {
-	case resp.Source() == nil:
-		return fmt.Errorf("actor %s could not be found", addr)
-	case expectingResponse && resp.Empty(), expectingResponse && resp.Get() == nil:
-		return fmt.Errorf("actor %s did not response", addr)
-	case resp.Error() != nil:
-		return resp.Error()
-	default:
-		if expectingResponse {
-			if reflect.ValueOf(v).Elem().Type() != reflect.ValueOf(resp.Get()).Type() {
-				return fmt.Errorf("%s returned unexpected resp (%T): %v", addr, resp, resp)
-			}
-			reflect.ValueOf(v).Elem().Set(reflect.ValueOf(resp.Get()))
-		}
-		return nil
-	}
+	return actor.AskFunc(ask, addr.String(), req, v)
 }
 
 // TaskContainerDefaults returns TaskContainerDefaults for the specified pool.

@@ -3,6 +3,8 @@ package actor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -56,4 +58,48 @@ func askAll(
 		close(results)
 	}()
 	return results
+}
+
+type (
+	Cause              error
+	InvalidRequest     struct{ Cause }
+	ActorNotFound      struct{ Cause }
+	NoResponse         struct{ Cause }
+	ErrorResponse      struct{ Cause }
+	UnexpectedResponse struct{ Cause }
+)
+
+// AskFunc asks an actor and sets the response in v. It returns an error if the actor doesn't
+// respond, respond with an error, or v isn't settable.
+func AskFunc(ask func() Response, id string, req interface{}, v interface{}) error {
+	if reflect.ValueOf(v).IsValid() && !reflect.ValueOf(v).Elem().CanSet() {
+		return InvalidRequest{
+			fmt.Errorf("ask %s has valid but unsettable resp %T", id, v),
+		}
+	}
+	expectingResponse := reflect.ValueOf(v).IsValid() && reflect.ValueOf(v).Elem().CanSet()
+	switch resp := ask(); {
+	case resp.Source() == nil:
+		return ActorNotFound{
+			fmt.Errorf("actor %s could not be found", id),
+		}
+	case expectingResponse && resp.Empty(), expectingResponse && resp.Get() == nil:
+		return NoResponse{
+			fmt.Errorf("actor %s did not respond", id),
+		}
+	case resp.Error() != nil:
+		return ErrorResponse{
+			resp.Error(),
+		}
+	default:
+		if expectingResponse {
+			if reflect.ValueOf(v).Elem().Type() != reflect.ValueOf(resp.Get()).Type() {
+				return UnexpectedResponse{
+					fmt.Errorf("%s returned unexpected resp (%T): %v", id, resp, resp),
+				}
+			}
+			reflect.ValueOf(v).Elem().Set(reflect.ValueOf(resp.Get()))
+		}
+		return nil
+	}
 }

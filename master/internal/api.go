@@ -182,40 +182,23 @@ func (a *apiServer) filter(values interface{}, check func(int) bool) {
 //   - Finally, if the response's type is OK, it is put into v.
 //   - Else, a 500 is returned.
 func (a *apiServer) ask(addr actor.Address, req interface{}, v interface{}) error {
-	if reflect.ValueOf(v).IsValid() && !reflect.ValueOf(v).Elem().CanSet() {
-		return status.Errorf(
-			codes.Internal,
-			"ask to actor %s contains valid but unsettable response holder %T", addr, v,
-		)
+	ask := func() actor.Response {
+		return a.m.system.AskAt(addr, req)
 	}
-	expectingResponse := reflect.ValueOf(v).IsValid() && reflect.ValueOf(v).Elem().CanSet()
-	switch resp := a.m.system.AskAt(addr, req); {
-	case resp.Source() == nil:
+	switch err := actor.AskFunc(ask, addr.String(), req, v).(type) {
+	case nil:
+		return nil
+	case actor.ActorNotFound:
 		return api.NotFoundErrs("actor", fmt.Sprint(addr), true)
-	case expectingResponse && resp.Empty(), expectingResponse && resp.Get() == nil:
-		return status.Errorf(
-			codes.NotFound,
-			"actor %s %s", addr, actorDidNotRespond,
-		)
-	case resp.Error() != nil:
-		if ok, err := api.EchoErrToGRPC(resp.Error()); ok {
+	case actor.NoResponse:
+		return status.Errorf(codes.NotFound, err.Error())
+	case actor.ErrorResponse:
+		e := err.Cause
+		if ok, err := api.EchoErrToGRPC(e); ok {
 			return err
 		}
-		return api.APIErrToGRPC(resp.Error())
+		return api.APIErrToGRPC(e)
 	default:
-		if expectingResponse {
-			if reflect.ValueOf(v).Elem().Type() != reflect.ValueOf(resp.Get()).Type() {
-				return status.Errorf(
-					codes.Internal,
-					"actor %s returned unexpected message (%T): %v", addr, resp, resp,
-				)
-			}
-			reflect.ValueOf(v).Elem().Set(reflect.ValueOf(resp.Get()))
-		}
-		return nil
+		return status.Error(codes.Internal, err.Error())
 	}
 }
-
-const (
-	actorDidNotRespond = "did not respond"
-)

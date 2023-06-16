@@ -8,6 +8,7 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -21,6 +22,8 @@ import (
 type Jobs struct {
 	rm        rm.ResourceManager
 	actorByID map[model.JobID]*actor.Ref
+	system    *actor.System
+	syslog    *logrus.Entry
 }
 
 // NewJobs creates a new jobs actor.
@@ -53,10 +56,11 @@ func (j *Jobs) parseV1JobMsgs(
 }
 
 // jobQSnapshot asks for a fresh consistent snapshot of the job queue from the RM.
-func (j *Jobs) jobQSnapshot(ctx *actor.Context, resourcePool string) (sproto.AQueue, error) {
-	resp, err := j.rm.GetJobQ(ctx, sproto.GetJobQ{ResourcePool: resourcePool})
+func (j *Jobs) jobQSnapshot(resourcePool string) (sproto.AQueue, error) {
+	resp, err := j.system.Ask(j.rm.Ref(), sproto.GetJobQ{ResourcePool: resourcePool})
+	// resp, err := j.rm.GetJobQ(ctx, sproto.GetJobQ{ResourcePool: resourcePool})
 	if err != nil {
-		ctx.Log().WithError(err).Error("getting job queue info from RM")
+		j.syslog.WithError(err).Error("getting job queue info from RM")
 		return nil, err
 	}
 
