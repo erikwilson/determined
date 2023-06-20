@@ -61,17 +61,18 @@ func askAll(
 }
 
 type (
-	Cause              error
-	InvalidRequest     struct{ Cause }
-	ActorNotFound      struct{ Cause }
-	NoResponse         struct{ Cause }
-	ErrorResponse      struct{ Cause }
-	UnexpectedResponse struct{ Cause }
+	InvalidRequest     struct{ error }
+	ActorNotFound      struct{ error }
+	NoResponse         struct{ error }
+	ErrorResponse      struct{ error }
+	UnexpectedResponse struct{ error }
 )
+
+func (e ErrorResponse) Unwrap() error { return e.error }
 
 // AskFunc asks an actor and sets the response in v. It returns an error if the actor doesn't
 // respond, respond with an error, or v isn't settable.
-func AskFunc(ask func() Response, id string, req interface{}, v interface{}) error {
+func AskFunc(ask func() Response, id string, v interface{}) error {
 	if reflect.ValueOf(v).IsValid() && !reflect.ValueOf(v).Elem().CanSet() {
 		return InvalidRequest{
 			fmt.Errorf("ask %s has valid but unsettable resp %T", id, v),

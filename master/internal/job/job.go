@@ -57,8 +57,12 @@ func (j *Jobs) parseV1JobMsgs(
 
 // jobQSnapshot asks for a fresh consistent snapshot of the job queue from the RM.
 func (j *Jobs) jobQSnapshot(resourcePool string) (sproto.AQueue, error) {
-	resp, err := j.system.Ask(j.rm.Ref(), sproto.GetJobQ{ResourcePool: resourcePool})
-	// resp, err := j.rm.GetJobQ(ctx, sproto.GetJobQ{ResourcePool: resourcePool})
+	req := sproto.GetJobQ{ResourcePool: resourcePool}
+	ask := func() actor.Response {
+		return j.system.AskAt(j.rm.Ref().Address(), req)
+	}
+	resp := sproto.AQueue{}
+	err := actor.AskFunc(ask, "resource-pool", &resp)
 	if err != nil {
 		j.syslog.WithError(err).Error("getting job queue info from RM")
 		return nil, err
@@ -68,16 +72,14 @@ func (j *Jobs) jobQSnapshot(resourcePool string) (sproto.AQueue, error) {
 }
 
 func (j *Jobs) getJobs(
-	ctx *actor.Context,
 	resourcePool string,
 	desc bool,
 	states []jobv1.State,
 ) ([]*jobv1.Job, error) {
-	jobQ, err := j.jobQSnapshot(ctx, resourcePool)
+	jobQ, err := j.jobQSnapshot(resourcePool)
 	if err != nil {
 		return nil, err
 	}
-
 	// Get jobs from the job actors.
 	jobRefs := make([]*actor.Ref, 0, len(jobQ))
 	for jID := range jobQ {
@@ -86,9 +88,9 @@ func (j *Jobs) getJobs(
 			jobRefs = append(jobRefs, jobRef)
 		}
 	}
-	jobs, err := j.parseV1JobMsgs(ctx.AskAll(sproto.GetJob{}, jobRefs...).GetAll())
+	jobs, err := j.parseV1JobMsgs(j.system.AskAll(sproto.GetJob{}, jobRefs...).GetAll())
 	if err != nil {
-		ctx.Log().WithError(err).Error("parsing responses from job actors")
+		j.syslog.WithError(err).Error("parsing responses from job actors")
 		return nil, err
 	}
 
@@ -128,12 +130,12 @@ func (j *Jobs) getJobs(
 	return jobsInRM, nil
 }
 
-func (j *Jobs) setJobPriority(ctx *actor.Context, jobID model.JobID, priority int) error {
+func (j *Jobs) setJobPriority(jobID model.JobID, priority int) error {
 	if priority < 1 || priority > 99 {
 		return errors.New("priority must be between 1 and 99")
 	}
 	jobActor := j.actorByID[jobID]
-	resp := ctx.Ask(jobActor, sproto.SetGroupPriority{
+	resp := j.system.Ask(jobActor, sproto.SetGroupPriority{
 		Priority: priority,
 	})
 	return resp.Error()
@@ -152,7 +154,6 @@ func (j *Jobs) Receive(ctx *actor.Context) error {
 
 	case *apiv1.GetJobsRequest:
 		jobs, err := j.getJobs(
-			ctx,
 			msg.ResourcePool,
 			msg.OrderBy == apiv1.OrderBy_ORDER_BY_DESC,
 			msg.States)
@@ -163,7 +164,6 @@ func (j *Jobs) Receive(ctx *actor.Context) error {
 		ctx.Respond(jobs)
 	case *apiv1.GetJobsV2Request:
 		jobs, err := j.getJobs(
-			ctx,
 			msg.ResourcePool,
 			msg.OrderBy == apiv1.OrderBy_ORDER_BY_DESC,
 			msg.States)
@@ -174,7 +174,7 @@ func (j *Jobs) Receive(ctx *actor.Context) error {
 		ctx.Respond(jobs)
 
 	case sproto.GetJobSummary:
-		jobs, err := j.jobQSnapshot(ctx, msg.ResourcePool)
+		jobs, err := j.jobQSnapshot(msg.ResourcePool)
 		if err != nil {
 			ctx.Respond(err)
 			return nil
@@ -203,7 +203,7 @@ func (j *Jobs) Receive(ctx *actor.Context) error {
 			switch action := update.GetAction().(type) {
 			case *jobv1.QueueControl_Priority:
 				priority := int(action.Priority)
-				if err := j.setJobPriority(ctx, jobID, priority); err != nil {
+				if err := j.setJobPriority(jobID, priority); err != nil {
 					errors = append(errors, err.Error())
 				}
 			case *jobv1.QueueControl_Weight:
@@ -211,7 +211,7 @@ func (j *Jobs) Receive(ctx *actor.Context) error {
 					errors = append(errors, "weight must be greater than 0")
 					continue
 				}
-				resp := ctx.Ask(jobActor, sproto.SetGroupWeight{
+				resp := j.system.Ask(jobActor, sproto.SetGroupWeight{
 					Weight: float64(action.Weight),
 				})
 				if err := resp.Error(); err != nil {
@@ -222,7 +222,7 @@ func (j *Jobs) Receive(ctx *actor.Context) error {
 					errors = append(errors, "resource pool must be set")
 					continue
 				}
-				resp := ctx.Ask(jobActor, sproto.SetResourcePool{
+				resp := j.system.Ask(jobActor, sproto.SetResourcePool{
 					ResourcePool: action.ResourcePool,
 				})
 				if err := resp.Error(); err != nil {

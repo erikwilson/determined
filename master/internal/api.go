@@ -185,7 +185,7 @@ func (a *apiServer) ask(addr actor.Address, req interface{}, v interface{}) erro
 	ask := func() actor.Response {
 		return a.m.system.AskAt(addr, req)
 	}
-	switch err := actor.AskFunc(ask, addr.String(), req, v).(type) {
+	switch err := actor.AskFunc(ask, addr.String(), v).(type) {
 	case nil:
 		return nil
 	case actor.ActorNotFound:
@@ -193,11 +193,10 @@ func (a *apiServer) ask(addr actor.Address, req interface{}, v interface{}) erro
 	case actor.NoResponse:
 		return status.Errorf(codes.NotFound, err.Error())
 	case actor.ErrorResponse:
-		e := err.Cause
-		if ok, err := api.EchoErrToGRPC(e); ok {
+		if ok, err := api.EchoErrToGRPC(err.Unwrap()); ok {
 			return err
 		}
-		return api.APIErrToGRPC(e)
+		return api.APIErrToGRPC(err)
 	default:
 		return status.Error(codes.Internal, err.Error())
 	}

@@ -263,7 +263,7 @@ func (r *ResourceManager) Ask(ctx actor.Messenger, req interface{}, v interface{
 	ask := func() actor.Response {
 		return ctx.Ask(r.ref, req)
 	}
-	return actor.AskFunc(ask, r.ref.Address().String(), req, v)
+	return actor.AskFunc(ask, r.ref.Address().String(), v)
 }
 
 // AskAt asks an actor and sets the response in v. It returns an error if the actor doesn't
@@ -272,7 +272,7 @@ func AskAt(sys *actor.System, addr actor.Address, req interface{}, v interface{}
 	ask := func() actor.Response {
 		return sys.AskAt(addr, req)
 	}
-	return actor.AskFunc(ask, addr.String(), req, v)
+	return actor.AskFunc(ask, addr.String(), v)
 }
 
 // TaskContainerDefaults returns TaskContainerDefaults for the specified pool.
